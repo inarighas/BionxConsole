@@ -24,24 +24,28 @@
 #define CLICK  A4
 
 
-volatile uint8_t Flag_Recv = 0;
+volatile uint8_t Flag_period = 0;
 
 volatile uint32_t table[SIZE] = {0};
 volatile uint32_t* ptr = table;
 volatile uint32_t mean_speed = 0;
 volatile uint32_t mean_troque = 0 ;
 volatile uint8_t  retro_level = 0;
+
+volatile tCAN toto;
+volatile tCAN* received_msg = &toto;
 //float mean_s = 0;
 //float mean_t = 0;
 
 //Global Variables
 int j = 0;
+char state = 0;
 uint32_t spdalg = 0;                         // "Speed" reading from POT
 uint32_t spdref = 0;                         // Speed Reference from 0 to 55 km/h
 uint32_t spdreq = 0;                         // Speed Required to motor
 uint32_t spdcrt = 0;                         // Speed Correction Factor
 uint32_t spdtst = 0;                         // Speed math test 
-uint32_t spdout = 0x10;                      // Speed output to motor
+uint32_t spdout = 0;                      // Speed output to motor
 uint32_t mtrspd = 0;                         // Speed from motor
 uint32_t spddis = 0;                         // Speed Display in Human Readable Format
 uint32_t mtrtrq = 0;                          // Torque from motor
@@ -96,24 +100,19 @@ void printMessage(tCAN message){
 }
 
 uint8_t receiveFrame(tCAN* message_ptr){
-  uint8_t i = 0;
-  
-  while (mcp2515_check_message()) {
-      if (mcp2515_get_message(message_ptr)){
-        Serial.print("   >Got : ");
-        printMessage(*message_ptr);
+  // interrupt indicates when message is available (inside check message)
+  while (mcp2515_check_message()) { 
+    //flushBuffer(message_ptr);
+    if (mcp2515_get_message(message_ptr)){
+        //Serial.print("   >Got : ");
+        //printMessage(*message_ptr);
         updateDataVariables(*message_ptr);
         //Serial.print(mtrspd,HEX); 
         //Serial.print(" : ");                         
         //Serial.println(mtrtrq ,HEX);  
       }
-      flushBuffer(message_ptr);
-      i++;
+      delay(2);
   }
-  
-  if (i>0)  return true;
-  //Serial.println(">Got no response");
-  return false;
 }
 
 uint8_t flushBuffer(tCAN* message_ptr){
@@ -155,9 +154,7 @@ void pedinput () {
   spdalg = analogRead(0);                               
   // Analog Read due to limit switch, throwing
   // too much voltage in the open state due to
-  // Stray capacitance issues, limited the effect below*/
-  
-  delay(5);                                             
+  // Stray capacitance issues, limited the effect below*/                     
   spdalg = 600;
 //Serial.println(spdalg);                                 // Diagnostic Serial Connection
 
@@ -181,7 +178,7 @@ void pedinput () {
   else if (spdalg < 850) {
     spdreq = 0x5;
     spdref = 0x1;
-    spdout = 0xFF;
+    spdout = 0x20;
   }
   else if (spdalg > 850) {
     spdreq = 0x0;
@@ -194,13 +191,9 @@ void pedinput () {
 void sendFrame(uint16_t identifier, uint8_t len, uint32_t command){
   tCAN msg ;
   uint32_t tmp = 0;
-  tCAN toto;
-  tCAN* received_msg = &toto;
-
-  while (Flag_Recv == 1){
-    Flag_Recv = 0;
-    receiveFrame(received_msg);
-  }
+  
+  
+  receiveFrame(received_msg);
   
   if(len != 0x4 && len != 0x2){
     // or size message is different than length
@@ -220,8 +213,9 @@ void sendFrame(uint16_t identifier, uint8_t len, uint32_t command){
     msg.data[i] = 0x0;
     }
   mcp2515_send_message(&msg);
-  Serial.print(">>SENT  :");
-  printMessage(msg);
+  //Serial.print(">>SENT  :");
+  //printMessage(msg);
+  delay(2);
 
 }
 
@@ -231,78 +225,42 @@ void initialCommands(){
 
   
   sendFrame(BAT, 4, 0x200000);        // Start code of the system's set of CAN Bus packages.
-  delay(1);
-  receiveFrame(received_msg);
 
   sendFrame(BAT, 4, 0x210001);        // Start code of the system's set of CAN Bus packages.
-  delay(1);
-  receiveFrame(received_msg);
 
   sendFrame(BAT, 2, 0x003B);
-  delay(1);
-  receiveFrame(received_msg);
   
-
   sendFrame(BAT, 2, 0x003C);
-  delay(1);
-  receiveFrame(received_msg);
-  
   
   sendFrame(BAT, 4, 0x00220000);        // Unknown Function  
-  delay(1);
-  receiveFrame(received_msg);
-
+  
   sendFrame(BAT, 2, 0x003D);
-  delay(1);
-  receiveFrame(received_msg);
   
   sendFrame(MTR, 4, 0x00020000);        // Unknown Function
-  delay(1);
-  receiveFrame(received_msg);
-
 
   sendFrame(MTR, 4, 0x00410000);        // Unknown Function
-  delay(1);
-  receiveFrame(received_msg);  
 
-  sendFrame(MTR, 4, 0x00420001);         // Reverse or Forward 0 = Reverse and 1 = Forward 
-  delay(1);
-  receiveFrame(received_msg); 
-
+  sendFrame(MTR, 4, 0x00420001);         // Reverse or Forward 0 = Reverse and 1 = Forward
+  
   sendFrame(MTR, 2, 0x0020);             // Unknown Function 
-  delay(1);
-  receiveFrame(received_msg); 
 
   sendFrame(MTR, 2, 0x0011);             // Check Speed to see if already moving
-  delay(1);
-  receiveFrame(received_msg);
-}
+  }
 
 void startCANloop (){                  // Start sequence for a series of CAN requests. Must follow the Battery voltage check.
   // Start code of the system's set of CAN Bus packages.
-  tCAN toto;
-  tCAN* received_msg = &toto;
-  flushBuffer(received_msg);
   sendFrame(0x58, 2, 0x009C);
-  delay(1);
-  receiveFrame(received_msg);
+
   sendFrame(BAT, 2, 0x003B);
-  delay(1);
-  receiveFrame(received_msg);
-  
 
 }
 
 
 void regularCANmtr (){      // Regular CAN loop requests to the Motor
-  tCAN toto;
-  tCAN* received_msg = &toto;
-  flushBuffer(received_msg);
       
       // Currently Unknown Code, however due to the nature of the tests,  
     // assumed to be related to foot pedal power or regenerative breaking.
   sendFrame(MTR, 2, 0x0021);
-  receiveFrame(received_msg) ;
 
       // Send the Speed desired to the wheel
   sendFrame(MTR, 4, uint32_t(0x090000+spdout)); 
@@ -312,30 +270,20 @@ void regularCANmtr (){      // Regular CAN loop requests to the Motor
 
       // Check the Speed of the wheel
   sendFrame(MTR, 2, 0x0011);
-  receiveFrame(received_msg);
       
       // Check the Torque Sensor of the Wheel, 14=Torque Sensor Value
   sendFrame(MTR, 2, 0x0014);
-  receiveFrame(received_msg);
 
   if(REVERSEMODE) sendFrame(MTR, 4, 0x00420000);         // Reverse or Forward 0 = Reverse and 1 = Forward
 
 }
   
 void regularCANbat () {
-  tCAN toto;
-  tCAN* received_msg = &toto;
-  flushBuffer(received_msg);
-
       // Send Text to appear to request the status of the battery.
   sendFrame(BAT, 2, 0x0032);
-  receiveFrame(received_msg);
 }
 
 void regular_cycle(){
-  tCAN toto;
-  tCAN* received_msg = &toto;
-  flushBuffer(received_msg);
   /*Serial.println(millis());
   Serial.print("s ");
   Serial.print(mean_speed);
@@ -344,35 +292,23 @@ void regular_cycle(){
 
     startCANloop ();                       // Start of the CAN Loop
     regularCANmtr ();                      // One Standard Motor CAN Cycle  
-    //regularCANmtr ();                      // One Standard Motor CAN Cycle 
-    //regularCANmtr ();                      // One Standard Motor CAN Cycle
-    //regularCANmtr ();                      // One Standard Motor CAN Cycle
+    regularCANmtr ();                      // One Standard Motor CAN Cycle 
+    regularCANmtr ();                      // One Standard Motor CAN Cycle
+    regularCANmtr ();                      // One Standard Motor CAN Cycle
     regularCANbat ();                      // Ending Battery Cycle
 
 }
 
 void shutdown_click(){
-  tCAN toto;
-  tCAN* received_msg = &toto;
-  flushBuffer(received_msg);
   regularCANbat ();                      // Ending Battery Cycle
   Serial.println("... Battery shutdown");
-  delay(1000);
   sendFrame(MTR, 4, 0x420001);
-  delay(10);
-  receiveFrame(received_msg);
   
   sendFrame(BAT, 4, 0x250001);
-  delay(10);
-  receiveFrame(received_msg);
 
   exit(0);
  }
 
-void MCP2515_ISR()
-{
-     Flag_Recv = 1;
-}
 
 void setup() {
   Serial.begin(115200);
@@ -392,25 +328,24 @@ void setup() {
 
 
   //attachInterrupt(digitalPinToInterrupt(CLICK), shutdown_click, LOW);
-   attachInterrupt(0, MCP2515_ISR, FALLING);  // interrupt indicates when message is available
+
   //interrupt Setup
-  //Timer1.initialize(75000);
-  //Timer1.attachInterrupt(regular_cycle); 
+  Timer1.initialize(50000);
+  Timer1.attachInterrupt(CYCLE_PERIOD_ISR); 
 }
 
 
 
 void loop() {
  noInterrupts();
- tCAN toto;
- tCAN* received_msg = &toto;
- flushBuffer(received_msg);
-
+ int x = 0;
+ int t = 0;
  spdalg = 0;                          // "Speed" reading from POT
  spdref = 0;                          // Speed Reference from 0 to 55 km/h
  spdreq = 0;                          // Speed Required to motor
  spdcrt = 0;                          // Speed Correction Factor
  spdout = 0;                         // Speed output to motor
+ state = 0;
  delay(1000);
 
  
@@ -427,23 +362,36 @@ void loop() {
  Serial.println("Keeping interrupts doing job ;)");
  
  while(1){
-   regular_cycle();
-   delay(50);
-  }
-
-  /* 
-  Serial.println("... Battery shutdown");
-  sendFrame(MTR, 4, 0x420001);
-  delay(10);
-  receiveFrame(received_msg);
-  
-  sendFrame(BAT, 4, 0x250001);
-  delay(10);
-  receiveFrame(received_msg);
-  Serial.println("... Battery shutdown");
-  while(1);
-  */
+   if (Flag_period){
+     Flag_period = 0;
+     x = millis();
+     Serial.println(x-t);
+     t=x;
+     switch (state){
+     case 0:
+       startCANloop();
+       regularCANmtr();
+       break;
+     case 1:
+     case 2:
+       regularCANmtr();
+       break;
+     case 3:
+       regularCANmtr();
+       regularCANbat();
+     break;
+     }
+     state = ((state+1)%4);
+   }
+ }
 }
+//Interruptions routines
+
+void CYCLE_PERIOD_ISR(){
+  if (Flag_period == 1) Serial.println("WWAAA");
+  Flag_period = 1;
+}
+
 
 
 //Optional stuff
