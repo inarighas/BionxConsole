@@ -43,8 +43,8 @@ uint8_t receiveFrame(tCAN* message_ptr){
       //Serial.println("Got smtg!!");
       delay(1);
       if (mcp2515_get_message(message_ptr)){
-        //Serial.print("   >Got : ");
-        //printMessage(*message_ptr);
+        Serial.print("   >Got : ");
+        printMessage(*message_ptr);
         //updateDataVariables(*message_ptr);
         //Serial.print(mtrspd,HEX); 
         //Serial.print(" \t\t ");                         
@@ -118,8 +118,8 @@ char sendFrame(uint16_t identifier, uint8_t len, uint32_t command){
     msg.data[i] = 0x0;
     }
   mcp2515_send_message(&msg);
-  //Serial.print(">>SENT  :");
-  //printMessage(msg);
+  Serial.print(">>SENT  :");
+  printMessage(msg);
   }
 
 

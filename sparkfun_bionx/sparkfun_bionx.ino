@@ -5,7 +5,7 @@
 #include "mcp2515_defs.h"
 #include <inttypes.h>
 #include <avr/io.h>
-
+#include <avr/sleep.h>
 
 #include <TimerOne.h>
 //Major Macros
@@ -40,10 +40,14 @@ volatile tCAN* received_msg = &toto;
 //Global Variables
 int j = 0;
 char state = 0;
+char sleep = 0;
 uint32_t spdalg = 0;                         // "Speed" reading from POT
 uint32_t spdref = 0;                         // Speed Reference from 0 to 55 km/h
 uint32_t spdreq = 0;                         // Speed Required to motor
 uint32_t spdcrt = 0;                         // Speed Correction Factor
+
+uint32_t consigne = 0x05; 
+
 uint32_t spdtst = 0;                         // Speed math test 
 uint32_t spdout = 0;                      // Speed output to motor
 uint32_t mtrspd = 0;                         // Speed from motor
@@ -104,14 +108,14 @@ uint8_t receiveFrame(tCAN* message_ptr){
   while (mcp2515_check_message()) { 
     //flushBuffer(message_ptr);
     if (mcp2515_get_message(message_ptr)){
-        //Serial.print("   >Got : ");
-        //printMessage(*message_ptr);
-        updateDataVariables(*message_ptr);
-        //Serial.print(mtrspd,HEX); 
-        //Serial.print(" : ");                         
-        //Serial.println(mtrtrq ,HEX);  
-      }
-      delay(2);
+      //Serial.print("   >Got : ");
+      //printMessage(*message_ptr);
+      updateDataVariables(*message_ptr);
+      //Serial.print(mtrspd,HEX); 
+      //Serial.print(" : ");                         
+      //Serial.println(mtrtrq ,HEX);  
+    }
+    delay(2);
   }
 }
 
@@ -178,7 +182,7 @@ void pedinput () {
   else if (spdalg < 850) {
     spdreq = 0x5;
     spdref = 0x1;
-    spdout = 0x20;
+    spdout = consigne;
   }
   else if (spdalg > 850) {
     spdreq = 0x0;
@@ -289,7 +293,7 @@ void regular_cycle(){
   Serial.print(mean_speed);
   Serial.print(" - t");
   Serial.println(mean_troque);*/
-
+  
     startCANloop ();                       // Start of the CAN Loop
     regularCANmtr ();                      // One Standard Motor CAN Cycle  
     regularCANmtr ();                      // One Standard Motor CAN Cycle 
@@ -300,13 +304,23 @@ void regular_cycle(){
 }
 
 void shutdown_click(){
-  regularCANbat ();                      // Ending Battery Cycle
-  Serial.println("... Battery shutdown");
-  sendFrame(MTR, 4, 0x420001);
-  
-  sendFrame(BAT, 4, 0x250001);
-
-  exit(0);
+  consigne = 0x00;
+  sendFrame(MTR, 4, 0x420000);
+  delay(5);
+  for (int i =0;i<1;i++){
+    initialCommands ();
+    //Serial.println("  >... Ended sending initial commands.");
+    //Serial.println("  >... Ended regular Motor procedure.");  
+    //Serial.println("Starting regular Battery procedure...");
+    regular_cycle();                      // Ending Battery Cycle
+  }
+ Serial.println("... Battery shutdown");
+ delay(1000);
+ sendFrame(MTR, 4, 0x420001);
+ delay(5);
+ sendFrame(BAT, 4, 0x250001);
+ Serial.println("Commands are sent!");
+ delay(1000);
  }
 
 
@@ -323,8 +337,8 @@ void setup() {
   delay(1000);
   //Serial.println("speed \t\t troque");
 
-  //pinMode(CLICK,INPUT);
-  //digitalWrite(CLICK, HIGH);
+  pinMode(CLICK,INPUT);
+  digitalWrite(CLICK, HIGH);
 
 
   //attachInterrupt(digitalPinToInterrupt(CLICK), shutdown_click, LOW);
@@ -362,11 +376,15 @@ void loop() {
  Serial.println("Keeping interrupts doing job ;)");
  
  while(1){
+   if (digitalRead(CLICK) == 0 && sleep ==0){
+     Timer1.detachInterrupt();
+     delay(1000);
+     shutdown_click();
+     sleepNow();
+   }
    if (Flag_period){
      Flag_period = 0;
-     x = millis();
-     Serial.println(x-t);
-     t=x;
+     x = millis();Serial.println(x-t);t=x;
      switch (state){
      case 0:
        startCANloop();
@@ -385,14 +403,72 @@ void loop() {
    }
  }
 }
-//Interruptions routines
+//Interrupt routines
 
 void CYCLE_PERIOD_ISR(){
-  if (Flag_period == 1) Serial.println("WWAAA");
+  //if (Flag_period == 1) Serial.println("WTF!! too slow");
   Flag_period = 1;
 }
 
-
+void sleepNow()         // here we put the arduino to sleep
+{
+    /* Now is the time to set the sleep mode. In the Atmega8 datasheet
+     * http://www.atmel.com/dyn/resources/prod_documents/doc2486.pdf on page 35
+     * there is a list of sleep modes which explains which clocks and
+     * wake up sources are available in which sleep mode.
+     *
+     * In the avr/sleep.h file, the call names of these sleep modes are to be found:
+     *
+     * The 5 different modes are:
+     *     SLEEP_MODE_IDLE         -the least power savings
+     *     SLEEP_MODE_ADC
+     *     SLEEP_MODE_PWR_SAVE
+     *     SLEEP_MODE_STANDBY
+     *     SLEEP_MODE_PWR_DOWN     -the most power savings
+     *
+     * For now, we want as much power savings as possible, so we
+     * choose the according
+     * sleep mode: SLEEP_MODE_PWR_DOWN
+     *
+     */  
+    set_sleep_mode(SLEEP_MODE_PWR_DOWN);   // sleep mode is set here
+ 
+    sleep_enable();          // enables the sleep bit in the mcucr register
+                             // so sleep is possible. just a safety pin
+ 
+    /* Now it is time to enable an interrupt. We do it here so an
+     * accidentally pushed interrupt button doesn't interrupt
+     * our running program. if you want to be able to run
+     * interrupt code besides the sleep function, place it in
+     * setup() for example.
+     *
+     * In the function call attachInterrupt(A, B, C)
+     * A   can be either 0 or 1 for interrupts on pin 2 or 3.  
+     *
+     * B   Name of a function you want to execute at interrupt for A.
+     *
+     * C   Trigger mode of the interrupt pin. can be:
+     *             LOW        a low level triggers
+     *             CHANGE     a change in level triggers
+     *             RISING     a rising edge of a level triggers
+     *             FALLING    a falling edge of a level triggers
+     *
+     * In all but the IDLE sleep modes only LOW can be used.
+     */
+ 
+    //attachInterrupt(0,wakeUpNow, LOW); // use interrupt 0 (pin 2) and run function
+                                       // wakeUpNow when pin 2 gets LOW
+ 
+    sleep_mode();            // here the device is actually put to sleep!!
+                             // THE PROGRAM CONTINUES FROM HERE AFTER WAKING UP
+ 
+    //sleep_disable();         // first thing after waking from sleep:
+                             // disable sleep...
+    //detachInterrupt(0);      // disables interrupt 0 on pin 2 so the
+                             // wakeUpNow code will not be executed
+                             // during normal running time.
+ 
+}
 
 //Optional stuff
 /*
