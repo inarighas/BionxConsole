@@ -1,13 +1,15 @@
-#include "Canbus.h"  // don't forget to include these
-#include "defaults.h"
+#include "Canbus.h"   // don't forget to include these
+#include "defaults.h" // Sparkfun Can shield libraries
 #include "global.h"
 #include "mcp2515.h"
 #include "mcp2515_defs.h"
-#include <inttypes.h>
-#include <avr/io.h>
-#include <avr/sleep.h>
 
-#include <TimerOne.h>
+#include "TimerOne.h" // Timer library (easier to use)
+
+#include <inttypes.h> // byte types , clean 
+#include <avr/io.h>   
+#include <avr/sleep.h>// sleep mode library
+
 //Major Macros
 #define BAT   0x10
 #define MTR   0x20
@@ -24,18 +26,16 @@
 #define CLICK  A4
 
 
+//Volatile global variables
 volatile uint8_t Flag_period = 0;
-
 volatile uint32_t table[SIZE] = {0};
 volatile uint32_t* ptr = table;
 volatile uint32_t mean_speed = 0;
 volatile uint32_t mean_troque = 0 ;
 volatile uint8_t  retro_level = 0;
-
 volatile tCAN toto;
 volatile tCAN* received_msg = &toto;
-//float mean_s = 0;
-//float mean_t = 0;
+
 
 //Global Variables
 int j = 0;
@@ -46,7 +46,7 @@ uint32_t spdref = 0;                         // Speed Reference from 0 to 55 km/
 uint32_t spdreq = 0;                         // Speed Required to motor
 uint32_t spdcrt = 0;                         // Speed Correction Factor
 
-uint32_t consigne = 0x05; 
+uint32_t consigne = 0x5; 
 
 uint32_t spdtst = 0;                         // Speed math test 
 uint32_t spdout = 0;                      // Speed output to motor
@@ -106,7 +106,6 @@ void printMessage(tCAN message){
 uint8_t receiveFrame(tCAN* message_ptr){
   // interrupt indicates when message is available (inside check message)
   while (mcp2515_check_message()) { 
-    //flushBuffer(message_ptr);
     if (mcp2515_get_message(message_ptr)){
       //Serial.print("   >Got : ");
       //printMessage(*message_ptr);
@@ -195,8 +194,7 @@ void pedinput () {
 void sendFrame(uint16_t identifier, uint8_t len, uint32_t command){
   tCAN msg ;
   uint32_t tmp = 0;
-  
-  
+    
   receiveFrame(received_msg);
   
   if(len != 0x4 && len != 0x2){
@@ -208,7 +206,6 @@ void sendFrame(uint16_t identifier, uint8_t len, uint32_t command){
 
   msg.header.length = len;
   msg.id = identifier;
-  //Serial.println(uint32_t(command),HEX);
   for(int i = 0; i<len; i++){
     tmp = (uint32_t(command & (uint32_t(0xFF) << (8*i))) >> (8*i));
     msg.data[len-i-1] = uint8_t(tmp);
@@ -287,13 +284,7 @@ void regularCANbat () {
   sendFrame(BAT, 2, 0x0032);
 }
 
-void regular_cycle(){
-  /*Serial.println(millis());
-  Serial.print("s ");
-  Serial.print(mean_speed);
-  Serial.print(" - t");
-  Serial.println(mean_troque);*/
-  
+void regular_cycle(){  
     startCANloop ();                       // Start of the CAN Loop
     regularCANmtr ();                      // One Standard Motor CAN Cycle  
     regularCANmtr ();                      // One Standard Motor CAN Cycle 
@@ -310,9 +301,8 @@ void shutdown_click(){
   for (int i =0;i<1;i++){
     initialCommands ();
     //Serial.println("  >... Ended sending initial commands.");
-    //Serial.println("  >... Ended regular Motor procedure.");  
-    //Serial.println("Starting regular Battery procedure...");
-    regular_cycle();                      // Ending Battery Cycle
+    //Serial.println("Starting regular cycle...");
+    regular_cycle();
   }
  Serial.println("... Battery shutdown");
  delay(1000);
@@ -326,25 +316,30 @@ void shutdown_click(){
 
 void setup() {
   Serial.begin(115200);
-  //Initialise MCP2515 CAN controller at the specified speed
-  if(Canbus.init(CANSPEED_125)) Serial.println("CAN Init ok");
-  else Serial.println("Can't Init CAN");
-  delay(1000);
-  Serial.println("end setup");
-
-  Serial.println("  >Start up CAN cycle ...");
   Serial.println("HelloWorld!");
+  
+  //Initialise MCP2515 CAN controller at the specified speed
+  if(Canbus.init(CANSPEED_125)) Serial.print("CAN Init ok");
+  else Serial.print("Can't Init CAN");
   delay(1000);
-  //Serial.println("speed \t\t troque");
+  Serial.println(" => end init.");
 
-  pinMode(CLICK,INPUT);
+  Serial.println(">>>Starting up CAN cycle ...");
+  delay(1000);
+
+  
+  pinMode(CLICK,INPUT);    //click to shutdown 
+  pinMode(RIGHT,INPUT);    //move right to increase speedout value
+  pinMode(LEFT,INPUT);     //move lest to decrease speedout value
+  //pinMode(,INPUT);
   digitalWrite(CLICK, HIGH);
-
+  digitalWrite(RIGHT, HIGH); 
+  digitalWrite(LEFT, HIGH);
 
   //attachInterrupt(digitalPinToInterrupt(CLICK), shutdown_click, LOW);
 
   //interrupt Setup
-  Timer1.initialize(50000);
+  Timer1.initialize(50000);                  // 20Hz sampling
   Timer1.attachInterrupt(CYCLE_PERIOD_ISR); 
 }
 
@@ -366,25 +361,31 @@ void loop() {
  initialCommands ();
  //Serial.println("  >... Ended sending initial commands.");
  regularCANmtr ();                     // Appears to give one motor cycle afterwards.
-  //Serial.println("  >... Ended regular Motor procedure.");  
-  //Serial.println("Starting regular Battery procedure...");
  regularCANbat ();                      // Ending Battery Cycle
-  //Serial.println("  >... Ended regular Battery procedure.");
 
  interrupts();
- Serial.println("Free Isr!!");
- Serial.println("Keeping interrupts doing job ;)");
+ Serial.println("Free Isr!! Keeping interrupts doing job ;)");
  
  while(1){
+   Serial.println(consigne);
    if (digitalRead(CLICK) == 0 && sleep ==0){
      Timer1.detachInterrupt();
      delay(1000);
      shutdown_click();
      sleepNow();
    }
+
    if (Flag_period){
      Flag_period = 0;
-     x = millis();Serial.println(x-t);t=x;
+     //x = millis();Serial.println(x-t);t=x;
+     if (digitalRead(RIGHT) == 0 ){
+       if (consigne < 0x40) consigne++;
+       else consigne = 0x40;
+     }
+     if (digitalRead(LEFT) == 0){
+       if (consigne > 0) consigne --;
+       else consigne =0;
+     }
      switch (state){
      case 0:
        startCANloop();
@@ -403,6 +404,8 @@ void loop() {
    }
  }
 }
+
+
 //Interrupt routines
 
 void CYCLE_PERIOD_ISR(){
