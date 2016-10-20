@@ -367,7 +367,7 @@ void loop() {
  Serial.println("Free Isr!! Keeping interrupts doing job ;)");
  
  while(1){
-   Serial.println(consigne);
+   //Serial.println(consigne);
    if (digitalRead(CLICK) == 0 && sleep ==0){
      Timer1.detachInterrupt();
      delay(1000);
