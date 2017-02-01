@@ -1,4 +1,4 @@
-  /**
+ /**
  * 
  *
  * Copyright (c) 2008-2009  All rights reserved.
@@ -27,11 +27,12 @@
 
 
 /* C++ wrapper */
-CanbusClass::CanbusClass() {
+CanbusClass::CanbusClass()
+{
 
- 
 }
-char CanbusClass::message_rx(unsigned char *buffer) {
+char CanbusClass::message_rx(unsigned char *buffer)
+{
 		tCAN message;
 	
 		if (mcp2515_check_message()) {
@@ -61,7 +62,8 @@ char CanbusClass::message_rx(unsigned char *buffer) {
 
 }
 
-char CanbusClass::message_tx(void) {
+char CanbusClass::message_tx(void)
+{
 	tCAN message;
 
 
@@ -163,11 +165,6 @@ char CanbusClass::ecu_req(unsigned char pid,  char *buffer)
 				}
 
 }
-
-
-
-
-
 
 char CanbusClass::init(unsigned char speed) {
 

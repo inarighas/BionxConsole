@@ -9,6 +9,8 @@
 #include <inttypes.h> // byte types , clean 
 #include <avr/io.h>   
 #include <avr/sleep.h>// sleep mode library
+#include <SoftwareSerial.h>
+
 
 //Major Macros
 #define BAT   0x10
@@ -26,13 +28,15 @@
 #define CLICK  A4
 
 
+
 //Volatile global variables
 volatile uint8_t Flag_period = 0;
 volatile uint32_t table[SIZE] = {0};
 volatile uint32_t* ptr = table;
 volatile uint32_t mean_speed = 0;
 volatile uint32_t mean_troque = 0 ;
-volatile uint8_t  retro_level = 0;
+volatile uint8_t  assis_level = 0;
+
 volatile tCAN toto;
 volatile tCAN* received_msg = &toto;
 
@@ -41,23 +45,27 @@ volatile tCAN* received_msg = &toto;
 int j = 0;
 char state = 0;
 char sleep = 0;
-uint32_t spdalg = 0;                         // "Speed" reading from POT
-uint32_t spdref = 0;                         // Speed Reference from 0 to 55 km/h
-uint32_t spdreq = 0;                         // Speed Required to motor
-uint32_t spdcrt = 0;                         // Speed Correction Factor
+uint32_t spdalg = 0;                      // "Speed" reading from POT
+uint32_t spdref = 0;                      // Speed Reference from 0 to 55 km/h
+uint32_t spdreq = 0;                      // Speed Required to motor
+uint32_t spdcrt = 0;                      // Speed Correction Factor
 
-uint32_t consigne = 0x5; 
-
-uint32_t spdtst = 0;                         // Speed math test 
+uint32_t spdtst = 0;                      // Speed math test 
 uint32_t spdout = 0;                      // Speed output to motor
-uint32_t mtrspd = 0;                         // Speed from motor
-uint32_t spddis = 0;                         // Speed Display in Human Readable Format
-uint32_t mtrtrq = 0;                          // Torque from motor
-int batvlt = 0;                       // General value for a fully charged battery
-boolean strt = false;                    // Check for irregular cycle if its in the start up or not
-int irrlp = 0;                           // Irregular CAN Loop every 3 cycles
+uint32_t mtrspd = 0;                      // Speed from motor
+uint32_t spddis = 0;                      // Speed Display in Human Readable Format
+uint32_t mtrtrq = 0;                      // Torque from motor
+int batvlt = 0;                           // General value for a fully charged battery
+boolean strt = false;                     // Check for irregular cycle if its in the start up or not
+int irrlp = 0;                            // Irregular CAN Loop every 3 cycles
 
+int edge = 7;
+int much_r = 0;
+int much_l = 0;
+int x = 0;
+int t = 0;
 
+SoftwareSerial LCD(3,6); // pin 6 = TX, pin 3 = RX (unused)
 
 void add_to_table(uint32_t val){
   *ptr = val;
@@ -89,7 +97,105 @@ uint16_t mean_trq_simple(void){
   return m;
 }
 
+// LCD Configuration functions =================================================
+void clearScreen(){
+  // Clear LCD screen
+  LCD.write(0xFE); // move cursor to beginning of first line
+  LCD.write(0x01);
+}
 
+void selectLineOne(){ 
+  //puts the cursor at line 0 char 0.
+  LCD.write(0xFE); //command flag
+  LCD.write(128);  //position
+}
+  
+void selectLineTwo(){ 
+  //puts the cursor at line 0 char 0.
+  LCD.write(0xFE); //command flag
+  LCD.write(192); //position
+}
+
+void lcdSpeedUpd(int spd){
+  clearScreen();
+  if (spd>99)  LCD.print("Errspd");
+  else{
+    if (spd<10) LCD.print("0");
+    LCD.print(spd);
+    LCD.print("km/h");
+    LCD.print("- ");
+    LCD.print((mtrtrq & 0x64));
+      }
+}
+
+void lcdBatUpd(int level){
+  double step = 4;                //  Max0xDC - Min0xB5 divided by number of levels
+  int i=0;
+  selectLineTwo();
+  int n = ((level-0xB5)/step);
+  if (n>5) LCD.print("ErrBat");
+  else{
+    for(i=0;i<n;i++){
+      LCD.print("#");
+    }
+    while(i<5){
+      LCD.print(" ");
+      i++;
+    }
+    LCD.print(">");
+  }
+}
+
+void lcdAssLevel(int ass){
+  LCD.write(254);LCD.write(142);
+
+  if(ass>9 || ass<0) LCD.print("ER");
+  else{
+    if (ass<5) {
+      LCD.print("G");
+      LCD.print(5-ass);
+    }
+    else if (ass>5){
+      LCD.print("A");
+      LCD.print(ass-5);
+    }
+    else LCD.print("00");
+  }
+}
+
+void lcdAssStatus(int spdout, int ass){
+  int step = 11;
+  int i = 0;
+  LCD.write(254);LCD.write(200);
+  if (spdout>0x45){           // 0x45 is the highest value given by the battery
+    LCD.print("<ErrAss>");
+  }
+  else if (ass<5){
+    LCD.print("<rechrg>");
+  }
+  else if (ass>=5){
+    LCD.print("<");
+    int n = (spdout/step);
+    for(i=0;i<n;i++){
+      LCD.print("#");
+    }
+    while(i<6){
+      LCD.print(" ");
+      i++;
+    }
+    LCD.print(">");
+  }
+}
+
+void lcdUpdateData(){
+  lcdSpeedUpd(spddis);
+  lcdBatUpd(batvlt);
+  lcdAssLevel(assis_level);
+  lcdAssStatus(spdout,assis_level);
+}
+//==============================================================================
+
+  
 void printMessage(tCAN message){
   if (&message == NULL) return;
   Serial.print("ID: ");
@@ -99,7 +205,7 @@ void printMessage(tCAN message){
   for(int i=0;i<message.header.length;i++){
     Serial.print(message.data[i],HEX);
     Serial.print(" ");
-    }
+  }
   Serial.println("");
 }
 
@@ -107,9 +213,10 @@ uint8_t receiveFrame(tCAN* message_ptr){
   // interrupt indicates when message is available (inside check message)
   while (mcp2515_check_message()) { 
     if (mcp2515_get_message(message_ptr)){
-      //Serial.print("   >Got : ");
+      Serial.print("   >Got : ");
       //printMessage(*message_ptr);
       updateDataVariables(*message_ptr);
+      lcdUpdateData();
       //Serial.print(mtrspd,HEX); 
       //Serial.print(" : ");                         
       //Serial.println(mtrtrq ,HEX);  
@@ -119,12 +226,12 @@ uint8_t receiveFrame(tCAN* message_ptr){
 }
 
 uint8_t flushBuffer(tCAN* message_ptr){
-    message_ptr->id = 0;
-    message_ptr->header.rtr = 1;
-    message_ptr->header.length = 4;
-    for(int i=0;i<8;i++){
-      message_ptr->data[i]= 0;
-    }
+  message_ptr->id = 0;
+  message_ptr->header.rtr = 1;
+  message_ptr->header.length = 4;
+  for(int i=0;i<8;i++){
+    message_ptr->data[i]= 0;
+  }
 }
 
 void updateDataVariables(tCAN msg){
@@ -133,8 +240,8 @@ void updateDataVariables(tCAN msg){
     pedinput ();      
     /*if (mtrspd > spdref) {                            // Speed compensation
       spdcrt --;
-    }
-    if (mtrspd < spdref) {
+      }
+      if (mtrspd < spdref) {
       spdcrt ++;
       }*/
     spddis = map(mtrspd, 0, 47, 0, 55);               // motor speed to KM/h equvilents
@@ -153,41 +260,24 @@ void updateDataVariables(tCAN msg){
 }
 
 void pedinput () {
-/*
-  spdalg = analogRead(0);                               
-  // Analog Read due to limit switch, throwing
-  // too much voltage in the open state due to
-  // Stray capacitance issues, limited the effect below*/                     
-  spdalg = 600;
-//Serial.println(spdalg);                                 // Diagnostic Serial Connection
 
-/*
-    To compensate the issue with the limit switch treated it as a analog read
-    with a cut off above the threshold (0-1023 are the Arduino limits) to cause
-    the Arduino to turn on only when it has reached a high enough value.
-    Code is a sign change from ">" to "<" etc for the normally closed posistion.
-    Appears to solve the self starting issues.
-    
-    Due to the varying torque, and us requiring the max amount, code tells the motor to drive
-    as quickly as possible.
-*/
-  if (retro_level){
-    if (retro_level == 1)  spdout=0xFFFB;
-    else if (retro_level == 2)  spdout=0xFFF6;
-    else if (retro_level == 3)  spdout=0xFFEC;
-    else if (retro_level == 4)  spdout=0xFFD8;
-    }
+  int cmd_step = 0x10;
+  //Serial.println(spdalg);                                 // Diagnostic Serial Connection
+
+  if (assis_level < 5){
+    if (assis_level == 4) spdout = 0;
+    else if (assis_level == 3)  spdout = 0xFFFB;
+    else if (assis_level == 2)  spdout = 0xFFF6;
+    else if (assis_level == 1)  spdout = 0xFFEC;
+    else if (assis_level == 0)  spdout = 0xFFD8;
+  }
   
-  else if (spdalg < 850) {
+  else {
     spdreq = 0x5;
     spdref = 0x1;
-    spdout = consigne;
-  }
-  else if (spdalg > 850) {
-    spdreq = 0x0;
-    spdref = 0x0;
-    spdout = 0x0;
-    spdcrt = 0x0;
+    if (assis_level > 8) assis_level = 9;
+    spdout = ((assis_level-5) * cmd_step);
+    //spdout = 0x00;
   }
 }
  
@@ -202,20 +292,20 @@ void sendFrame(uint16_t identifier, uint8_t len, uint32_t command){
     Serial.print("ERROR SENDFRAME! -");
     Serial.println(len);
     //exit(0);
-    }
+  }
 
   msg.header.length = len;
   msg.id = identifier;
   for(int i = 0; i<len; i++){
     tmp = (uint32_t(command & (uint32_t(0xFF) << (8*i))) >> (8*i));
     msg.data[len-i-1] = uint8_t(tmp);
-    }
+  }
   for(int i = len; i<8; i++){
     msg.data[i] = 0x0;
-    }
+  }
   mcp2515_send_message(&msg);
-  //Serial.print(">>SENT  :");
-  //printMessage(msg);
+  Serial.print(">>SENT  :");
+  printMessage(msg);
   delay(2);
 
 }
@@ -246,7 +336,7 @@ void initialCommands(){
   sendFrame(MTR, 2, 0x0020);             // Unknown Function 
 
   sendFrame(MTR, 2, 0x0011);             // Check Speed to see if already moving
-  }
+}
 
 void startCANloop (){                  // Start sequence for a series of CAN requests. Must follow the Battery voltage check.
   // Start code of the system's set of CAN Bus packages.
@@ -259,20 +349,20 @@ void startCANloop (){                  // Start sequence for a series of CAN req
 
 void regularCANmtr (){      // Regular CAN loop requests to the Motor
       
-      // Currently Unknown Code, however due to the nature of the tests,  
-    // assumed to be related to foot pedal power or regenerative breaking.
+  // Currently Unknown Code, however due to the nature of the tests,  
+  // assumed to be related to foot pedal power or regenerative breaking.
   sendFrame(MTR, 2, 0x0021);
 
-      // Send the Speed desired to the wheel
+  // Send the Speed desired to the wheel
   sendFrame(MTR, 4, uint32_t(0x090000+spdout)); 
 
-      // Send the Speed desired to the wheel, repeated as BionX does
+  // Send the Speed desired to the wheel, repeated as BionX does
   sendFrame(MTR, 4, uint32_t(0x090000+spdout));
 
-      // Check the Speed of the wheel
+  // Check the Speed of the wheel
   sendFrame(MTR, 2, 0x0011);
       
-      // Check the Torque Sensor of the Wheel, 14=Torque Sensor Value
+  // Check the Torque Sensor of the Wheel, 14=Torque Sensor Value
   sendFrame(MTR, 2, 0x0014);
 
   if(REVERSEMODE) sendFrame(MTR, 4, 0x00420000);         // Reverse or Forward 0 = Reverse and 1 = Forward
@@ -280,22 +370,22 @@ void regularCANmtr (){      // Regular CAN loop requests to the Motor
 }
   
 void regularCANbat () {
-      // Send Text to appear to request the status of the battery.
+  // Send Text to appear to request the status of the battery.
   sendFrame(BAT, 2, 0x0032);
 }
 
 void regular_cycle(){  
-    startCANloop ();                       // Start of the CAN Loop
-    regularCANmtr ();                      // One Standard Motor CAN Cycle  
-    regularCANmtr ();                      // One Standard Motor CAN Cycle 
-    regularCANmtr ();                      // One Standard Motor CAN Cycle
-    regularCANmtr ();                      // One Standard Motor CAN Cycle
-    regularCANbat ();                      // Ending Battery Cycle
+  startCANloop ();                       // Start of the CAN Loop
+  regularCANmtr ();                      // One Standard Motor CAN Cycle  
+  regularCANmtr ();                      // One Standard Motor CAN Cycle 
+  regularCANmtr ();                      // One Standard Motor CAN Cycle
+  regularCANmtr ();                      // One Standard Motor CAN Cycle
+  regularCANbat ();                      // Ending Battery Cycle
 
 }
 
 void shutdown_click(){
-  consigne = 0x00;
+  spdout = 0x00;
   sendFrame(MTR, 4, 0x420000);
   delay(5);
   for (int i =0;i<1;i++){
@@ -303,28 +393,33 @@ void shutdown_click(){
     //Serial.println("  >... Ended sending initial commands.");
     //Serial.println("Starting regular cycle...");
     regular_cycle();
+    regularCANbat();
   }
- Serial.println("... Battery shutdown");
- delay(1000);
- sendFrame(MTR, 4, 0x420001);
- delay(5);
- sendFrame(BAT, 4, 0x250001);
- Serial.println("Commands are sent!");
- delay(1000);
- }
+  Serial.println("... Battery shutdown");
+  delay(200);
+  sendFrame(MTR, 4, 0x420001);
+  delay(1);
+  sendFrame(BAT, 4, 0x250001);
+  Serial.println("Commands are sent!");
+  delay(1000);
+}
 
-
-void setup() {
+ 
+void setup(){
   Serial.begin(115200);
-  Serial.println("HelloWorld!");
+  LCD.begin(9600);
   
   //Initialise MCP2515 CAN controller at the specified speed
   if(Canbus.init(CANSPEED_125)) Serial.print("CAN Init ok");
   else Serial.print("Can't Init CAN");
   delay(1000);
-  Serial.println(" => end init.");
+  //Serial.println("=> end init.");
 
   Serial.println(">>>Starting up CAN cycle ...");
+  clearScreen();
+  LCD.write(">Wake up battery");
+  selectLineTwo();
+  LCD.write("Bionx-Sparkfun");
   delay(1000);
 
   
@@ -340,69 +435,89 @@ void setup() {
 
   //interrupt Setup
   Timer1.initialize(50000);                  // 20Hz sampling
-  Timer1.attachInterrupt(CYCLE_PERIOD_ISR); 
+  Timer1.attachInterrupt(CYCLE_PERIOD_ISR);
+  //Suficient value to change assistance level
+  
+  noInterrupts();                //Stop Interrupts
+
+  spdalg = 0;                    // "Speed" reading from POT
+  spdref = 0;                    // Speed Reference from 0 to 55 km/h
+  spdreq = 0;                    // Speed Required to motor
+  spdcrt = 0;                    // Speed Correction Factor
+  spdout = 0;                    // Speed output to motor
+  state = 0;
+  assis_level = 5;               //5 means no assistance      
+  delay(1000);
+
+ 
+  initialCommands ();
+  //Serial.println("  >... Ended sending initial commands.");
+  regularCANmtr ();              // Appears to give one motor cycle afterwards.
+  regularCANbat ();              // Ending Battery Cycle
+
+  interrupts();
+  Serial.println("Free Isr!! Keeping interrupts doing job ;)");
 }
 
 
-
-void loop() {
- noInterrupts();
- int x = 0;
- int t = 0;
- spdalg = 0;                          // "Speed" reading from POT
- spdref = 0;                          // Speed Reference from 0 to 55 km/h
- spdreq = 0;                          // Speed Required to motor
- spdcrt = 0;                          // Speed Correction Factor
- spdout = 0;                         // Speed output to motor
- state = 0;
- delay(1000);
-
  
- initialCommands ();
- //Serial.println("  >... Ended sending initial commands.");
- regularCANmtr ();                     // Appears to give one motor cycle afterwards.
- regularCANbat ();                      // Ending Battery Cycle
+void loop() { 
+  //Serial.print(assis_level);
+  //Serial.print("  -  ");
+  //Serial.println(spdout,HEX);
+  if (digitalRead(CLICK) == 0 && sleep ==0){
+    Timer1.detachInterrupt();
+    delay(1000);
+    shutdown_click();
+    sleepNow();
+  }
 
- interrupts();
- Serial.println("Free Isr!! Keeping interrupts doing job ;)");
- 
- while(1){
-   //Serial.println(consigne);
-   if (digitalRead(CLICK) == 0 && sleep ==0){
-     Timer1.detachInterrupt();
-     delay(1000);
-     shutdown_click();
-     sleepNow();
-   }
-
-   if (Flag_period){
-     Flag_period = 0;
-     //x = millis();Serial.println(x-t);t=x;
-     if (digitalRead(RIGHT) == 0 ){
-       if (consigne < 0x40) consigne++;
-       else consigne = 0x40;
-     }
-     if (digitalRead(LEFT) == 0){
-       if (consigne > 0) consigne --;
-       else consigne =0;
-     }
-     switch (state){
-     case 0:
-       startCANloop();
-       regularCANmtr();
-       break;
-     case 1:
-     case 2:
-       regularCANmtr();
-       break;
-     case 3:
-       regularCANmtr();
-       regularCANbat();
-     break;
-     }
-     state = ((state+1)%4);
-   }
- }
+  if (Flag_period){
+    Flag_period = 0;
+    //x = millis();Serial.println(x-t);t=x;
+    if (digitalRead(RIGHT) == 0 ){
+      much_r++;
+      if (much_r > edge){
+        if (assis_level > 8) {
+          assis_level = 9;
+          much_r = 0;
+        }
+        else {
+          assis_level ++;
+          much_r = 0;
+        }
+      }
+    }
+    if (digitalRead(LEFT) == 0){
+      much_l++;
+      if (much_l > edge){
+        if (assis_level < 1) {
+          assis_level = 0;
+          much_l=0;
+        }
+        else {
+          assis_level --;
+          much_l = 0;
+        }
+      }
+    }
+    switch (state){
+    case 0:
+      startCANloop();
+      regularCANmtr();
+      break;
+    case 1:
+    case 2:
+    case 3:
+      regularCANmtr();
+      break;
+    case 4:
+      regularCANmtr();
+      regularCANbat();
+      break;
+    }
+    state = ((state+1)%5);
+  }
 }
 
 
@@ -415,67 +530,29 @@ void CYCLE_PERIOD_ISR(){
 
 void sleepNow()         // here we put the arduino to sleep
 {
-    /* Now is the time to set the sleep mode. In the Atmega8 datasheet
-     * http://www.atmel.com/dyn/resources/prod_documents/doc2486.pdf on page 35
-     * there is a list of sleep modes which explains which clocks and
-     * wake up sources are available in which sleep mode.
-     *
-     * In the avr/sleep.h file, the call names of these sleep modes are to be found:
-     *
-     * The 5 different modes are:
-     *     SLEEP_MODE_IDLE         -the least power savings
-     *     SLEEP_MODE_ADC
-     *     SLEEP_MODE_PWR_SAVE
-     *     SLEEP_MODE_STANDBY
-     *     SLEEP_MODE_PWR_DOWN     -the most power savings
-     *
-     * For now, we want as much power savings as possible, so we
-     * choose the according
-     * sleep mode: SLEEP_MODE_PWR_DOWN
-     *
-     */  
-    set_sleep_mode(SLEEP_MODE_PWR_DOWN);   // sleep mode is set here
+  set_sleep_mode(SLEEP_MODE_PWR_DOWN);   // sleep mode is set here
  
-    sleep_enable();          // enables the sleep bit in the mcucr register
-                             // so sleep is possible. just a safety pin
+  sleep_enable();          // enables the sleep bit in the mcucr register
+  // so sleep is possible. just a safety pin
+
+  clearScreen();
+  LCD.print("Battery is off.");
+  selectLineTwo();
+  LCD.print(">Going to sleep");
+  sleep_mode();            // here the device is actually put to sleep!!
+  // THE PROGRAM CONTINUES FROM HERE AFTER WAKING UP
  
-    /* Now it is time to enable an interrupt. We do it here so an
-     * accidentally pushed interrupt button doesn't interrupt
-     * our running program. if you want to be able to run
-     * interrupt code besides the sleep function, place it in
-     * setup() for example.
-     *
-     * In the function call attachInterrupt(A, B, C)
-     * A   can be either 0 or 1 for interrupts on pin 2 or 3.  
-     *
-     * B   Name of a function you want to execute at interrupt for A.
-     *
-     * C   Trigger mode of the interrupt pin. can be:
-     *             LOW        a low level triggers
-     *             CHANGE     a change in level triggers
-     *             RISING     a rising edge of a level triggers
-     *             FALLING    a falling edge of a level triggers
-     *
-     * In all but the IDLE sleep modes only LOW can be used.
-     */
- 
-    //attachInterrupt(0,wakeUpNow, LOW); // use interrupt 0 (pin 2) and run function
-                                       // wakeUpNow when pin 2 gets LOW
- 
-    sleep_mode();            // here the device is actually put to sleep!!
-                             // THE PROGRAM CONTINUES FROM HERE AFTER WAKING UP
- 
-    //sleep_disable();         // first thing after waking from sleep:
-                             // disable sleep...
-    //detachInterrupt(0);      // disables interrupt 0 on pin 2 so the
-                             // wakeUpNow code will not be executed
-                             // during normal running time.
+  //sleep_disable();         // first thing after waking from sleep:
+  // disable sleep...
+  //detachInterrupt(0);      // disables interrupt 0 on pin 2 so the
+  // wakeUpNow code will not be executed
+  // during normal running time.
  
 }
 
 //Optional stuff
 /*
-void irgCANcyc () {                     // Irregular Cycle, appears to happen every few times of a normal cycle
+  void irgCANcyc () {                     // Irregular Cycle, appears to happen every few times of a normal cycle
   msg.id = 16;                  // Apparent Sending of the battery voltage for reasons unknown with sperate code, however it matches the bat volt
   msg.header.length = 2;                  
   msg.data[1] = 0x33;
@@ -555,5 +632,5 @@ void irgCANcyc () {                     // Irregular Cycle, appears to happen ev
   delay(1);
   receiveFrame(received_msg);
 
-}
+  }
 */

@@ -10,7 +10,7 @@
 #include <SoftwareSerial.h>
 
 // Attach the serial display's RX line to digital pin 2
-SoftwareSerial LCD(3,2); // pin 2 = TX, pin 3 = RX (unused)
+SoftwareSerial LCD(3,6); // pin 6 = TX, pin 3 = RX (unused)
 
 
 /*
@@ -32,7 +32,7 @@ void setup()
 {
   //LCD.begin(19200);// all SerLCDs come at 9600 Baud by default
   //changeBaud();
-  LCD.begin(38400);
+  LCD.begin(9600);
 }
 //-------------------------------------------------------------------------------------------
 void loop()
@@ -69,7 +69,7 @@ void selectLineOne()
 { 
   //puts the cursor at line 0 char 0.
   LCD.write(0xFE); //command flag
-  LCD.write(128); //position
+  LCD.write(128);  //position
 }
 //-------------------------------------------------------------------------------------------
 void selectLineTwo()
