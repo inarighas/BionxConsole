@@ -1,5 +1,18 @@
-// SparkFun Serial LCD example 1
-// Clear the display and say "Hello World!"
+/* 
+ * Copyright (c) 2018 Ali Saghiran.
+ * 
+ * This program is free software: you can redistribute it and/or modify  
+ * it under the terms of the GNU General Public License as published by  
+ * the Free Software Foundation, version 3.
+ *
+ * This program is distributed in the hope that it will be useful, but 
+ * WITHOUT ANY WARRANTY; without even the implied warranty of 
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU 
+ * General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License 
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
+ */
 
 // This sketch is for Arduino versions 1.0 and later
 // If you're using an Arduino version older than 1.0, use
@@ -7,6 +20,7 @@
 
 // Use the softwareserial library to create a new "soft" serial port
 // for the display. This prevents display corruption when uploading code.
+
 #include <SoftwareSerial.h>
 
 // Attach the serial display's RX line to digital pin 2
