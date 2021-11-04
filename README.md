@@ -16,10 +16,10 @@ This project contains four sub-folders. Each one is independent and performs a s
 In the BionX e-bike, a CANBus ensures the communication between the battery, the engine, and the control console.  
 
 ```
- -----       -------		=============
+ -----       -------		    =============
 |Motor|     |Battery| 	   ||BionXConsole|| 
- -----		 -------		=============
-   ||		    ||			   ||
+ -----		   -------		    =============
+   ||		    ||			          ||
    ==================================	<- CAN bus
 ```
 
@@ -35,10 +35,10 @@ The first and easiest thing that can be made is to use the microcontroller to li
 The system is wired this way
 
 ```
- -----       -------		=============			===========
+ -----       -------		     =============			  ===========
 |Motor|     |Battery| 	   ||BionXConsole|| 	   ||ArduinoUno|| 
- -----		 -------		=============           ===========
-   ||		    ||			   ||                      ||
+ -----  		 -------		     =============        ===========
+   ||		    ||		      	   ||                      ||
    =============================================================== <- CAN bus
 ```
 In this setup, the Arduino does not communicate any message to the other components. It just "sniffs" messages between the motor and the battery and the BionXconsole and reports them in the Arduino buffer. It is preferable to use the Arduino IDE to get easily this information.
@@ -52,11 +52,11 @@ To get the code that performs this task, look at the folder `sparkfun_sniffer/`.
 Here, we start to use the Arduino as the control console. The set-up can be represented as follows
 
 ```
- -----       -------	     ==========
+ -----       -------	       ==========
 |Motor|     |Battery| 	   ||ArduinoUno|| 
- -----		 -------		 ==========
-   ||		    ||			   ||              
-   ==================================	 <- CAN bus
+ -----		   -------         ==========
+   ||		    ||			             ||              
+   ====================================================	 <- CAN bus
 ```
 The second thing I implemented is how to shut down the battery. This is very important since it helps to minimize energy consumption and it is done fully electronically (bus commands), contrary to the turning which is done through a button. The battery releases a sound when it is turned off. 
 
@@ -68,11 +68,11 @@ To get the code that performs this task, look at the folder `sparkfun_shutdown/`
 Here, we use the Arduino as the control console and we implement a speed and assistance control algorithm. The set-up stays globally the same, except adding an LCD Sparkfun module to get the speed and the pedal force values and a joystick to control speed assistance:
 
 ```
- -----       -------	     ==========			  -----     ----------
+ -----       -------	       ==========			      -----     ----------
 |Motor|     |Battery| 	   ||ArduinoUno||--------| LCD | + | Joystick | 
- -----		 -------		 ==========			  -----     ----------
-   ||		    ||			   ||              
-   ==================================	 <- CAN bus
+ -----		   -------		     ==========			      -----     ----------
+   ||		    ||			            ||              
+   =====================================================	 <- CAN bus
 ```
 The LCD seems necessary since testing the e-bike requires moving. The power supply of the controller can either be ensured by the e-bike battery (or an extra 9V non-rechargeable battery if you are lazy). 
 
