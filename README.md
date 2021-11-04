@@ -17,10 +17,10 @@ This project contains four sub-folders. Each one is independent and performs a s
 In the BionX e-bike, a CANBus ensures the communication between the battery, the engine, and the control console.  
 
 ```
- -----       -------		 ============
-|Motor|     |Battery| 	   ||BionXConsole|| 
- -----		   -------		 ============
-   ||		    ||			          ||
+ -----     -------		      ============
+|Motor|   |Battery| 	   ||BionXConsole|| 
+ -----		   -------		      ============
+   ||		      ||			          ||
    ==============================================	<- CAN bus
 ```
 
@@ -36,9 +36,9 @@ The first and easiest thing that can be made is to use the microcontroller to li
 The system is wired this way
 
 ```
- -----       -------         ============			 ==========
-|Motor|     |Battery| 	   ||BionXConsole|| 	   ||ArduinoUno|| 
- -----  	 ------          ============            ==========
+ -----    -------       =============			      ==========
+|Motor|  |Battery| 	   ||BionXConsole|| 	   ||ArduinoUno|| 
+ -----  	 ------        =============         ==========
    ||		    ||		      	   ||                      ||
    =============================================================== <- CAN bus
 ```
@@ -54,10 +54,10 @@ To get the code that performs this task, look at the folder `sparkfun_sniffer/`.
 Here, we start to use the Arduino as the control console. The set-up can be represented as follows
 
 ```
- -----       -------	     ==========
+ -----       -------	       ==========
 |Motor|     |Battery| 	   ||ArduinoUno|| 
- -----		 -------         ==========
-   ||		    ||			       ||              
+ -----		     -------        ==========
+   ||		    ||			               ||              
    ==================================================== <- CAN bus
 ```
 
@@ -71,10 +71,10 @@ To get the code that performs this task, look at the folder `sparkfun_shutdown/`
 Here, we use the Arduino as the control console and we implement a speed and assistance control algorithm. The set-up stays globally the same, except adding an LCD Sparkfun module to get the speed and the pedal force values and a joystick to control speed assistance:
 
 ```
- -----       -------	     ==========			      -----     ----------
-|Motor|     |Battery| 	   ||ArduinoUno|| --------   | LCD | + | Joystick | 
- -----		   -------		 ==========			      -----     ----------
-   ||		    ||			            ||              
+ -----       -------	       ==========			            -----     ----------
+|Motor|     |Battery| 	   ||ArduinoUno|| ---------- | LCD | + | Joystick | 
+ -----		     -------		      ==========			            -----      ----------
+   ||		        ||			            ||              
    =====================================================	 <- CAN bus
 ```
 
