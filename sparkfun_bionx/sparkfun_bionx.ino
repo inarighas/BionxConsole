@@ -18,7 +18,7 @@
 #define CSL   0x08    //40?
 
 #define SIZE   30
-#define REVERSEMODE 0
+#define REVERSEMODE 0     // To make wheels turn in reverse (maybe useful for something other than a bike)
 
 /* Define Joystick connection pins */
 #define UP     A1
@@ -27,15 +27,23 @@
 #define RIGHT  A5
 #define CLICK  A4
 
-
+#define K_ADAPT   4
+#define POS_CORR  25
+#define NEG_CORR  15
+#define UPD_PRD 5
 
 //Volatile global variables
 volatile uint8_t Flag_period = 0;
+volatile uint8_t Flag_update = UPD_PRD;
+volatile uint8_t Flag_startstate = 0;
+
 volatile uint32_t table[SIZE] = {0};
 volatile uint32_t* ptr = table;
 volatile uint32_t mean_speed = 0;
 volatile uint32_t mean_troque = 0 ;
 volatile uint8_t  assis_level = 0;
+volatile double old_th = 0;
+volatile double new_th = 0;
 
 volatile tCAN toto;
 volatile tCAN* received_msg = &toto;
@@ -123,27 +131,21 @@ void lcdSpeedUpd(int spd){
     if (spd<10) LCD.print("0");
     LCD.print(spd);
     LCD.print("km/h");
-    LCD.print("- ");
-    LCD.print((mtrtrq & 0x64));
-      }
+    LCD.print("#");
+    LCD.print(mean_troque);
+    LCD.print(" ");
+    LCD.print(spdout);
+  }
 }
 
 void lcdBatUpd(int level){
-  double step = 4;                //  Max0xDC - Min0xB5 divided by number of levels
+  double step = 3.5;                //  Max0xDC - Min0xB5 divided by number of levels
   int i=0;
   selectLineTwo();
-  int n = ((level-0xB5)/step);
-  if (n>5) LCD.print("ErrBat");
-  else{
-    for(i=0;i<n;i++){
-      LCD.print("#");
-    }
-    while(i<5){
-      LCD.print(" ");
-      i++;
-    }
-    LCD.print(">");
-  }
+  int n = ((level)/step);
+  LCD.print(level);
+  LCD.print(">");
+    //}
 }
 
 void lcdAssLevel(int ass){
@@ -164,7 +166,7 @@ void lcdAssLevel(int ass){
 }
 
 void lcdAssStatus(int spdout, int ass){
-  int step = 11;
+  int step = 10;
   int i = 0;
   LCD.write(254);LCD.write(200);
   if (spdout>0x45){           // 0x45 is the highest value given by the battery
@@ -213,10 +215,11 @@ uint8_t receiveFrame(tCAN* message_ptr){
   // interrupt indicates when message is available (inside check message)
   while (mcp2515_check_message()) { 
     if (mcp2515_get_message(message_ptr)){
-      Serial.print("   >Got : ");
+      //Serial.print("   >Got : ");
+      if (Flag_startstate == 0) Flag_startstate = 1;
       //printMessage(*message_ptr);
       updateDataVariables(*message_ptr);
-      lcdUpdateData();
+
       //Serial.print(mtrspd,HEX); 
       //Serial.print(" : ");                         
       //Serial.println(mtrtrq ,HEX);  
@@ -235,16 +238,16 @@ uint8_t flushBuffer(tCAN* message_ptr){
 }
 
 void updateDataVariables(tCAN msg){
-  if (msg.id == 0x8 && msg.data[1] == 0x11){    // Motor Speed
+  /*if (msg.id == 0x8 && msg.data[1] == 0x11){    // Motor Speed
     mtrspd = msg.data[3];
-    pedinput ();      
-    /*if (mtrspd > spdref) {                            // Speed compensation
-      spdcrt --;
-      }
-      if (mtrspd < spdref) {
-      spdcrt ++;
-      }*/
-    spddis = map(mtrspd, 0, 47, 0, 55);               // motor speed to KM/h equvilents
+    pedinput ();     
+    //if (mtrspd > spdref) {                            // Speed compensation
+    // spdcrt --;
+    //  }
+    //if (mtrspd < spdref) {
+    //spdcrt ++;
+    //}
+  spddis = map(mtrspd, 0, 47, 0, 55);               // motor speed to KM/h equvilents
   }
   else if (msg.id == 0x8 && msg.data[1] == 0x14){    // Torque/Force Applied to wheel
     mtrtrq = msg.data[3];
@@ -253,6 +256,18 @@ void updateDataVariables(tCAN msg){
     add_to_table((((uint32_t)mtrtrq)<<16)+mtrspd);
     mean_speed = mean_spd_simple();
     mean_troque = mean_trq_simple();
+  }*/
+  if (msg.id == 0x8 && msg.data[1] == 0x11){
+      mtrspd = msg.data[3];
+      spddis = map(mtrspd, 0, 47, 0, 55);               // motor speed to KM/h equvilents
+  }
+  else if (msg.id == 0x8 && msg.data[1] == 0x21){
+      mtrtrq = msg.data[3];
+      uint32_t val = (mtrtrq<<16)+spddis;
+      add_to_table(val);
+      mean_speed = mean_spd_simple();
+      mean_troque = mean_trq_simple();
+      pedinput();
   }
   else if (msg.id == 0x8 && msg.data[1] == 0x3B){
     batvlt = msg.data[3];
@@ -275,8 +290,18 @@ void pedinput () {
   else {
     spdreq = 0x5;
     spdref = 0x1;
-    if (assis_level > 8) assis_level = 9;
-    spdout = ((assis_level-5) * cmd_step);
+
+    // Assistance Algorithm
+    //    if (assis_level > 8) assis_level = 9;
+    new_th = ((assis_level-5)*mean_troque)/K_ADAPT;
+    if (new_th>old_th) old_th = old_th + (new_th - old_th)*10/POS_CORR;
+    else  old_th = (old_th - new_th)*10/NEG_CORR;
+    //Serial.println("Values:");
+    //Serial.println(old_th);
+    //Serial.println(new_th);
+    spdout = static_cast<unsigned int>(old_th);
+    
+    //spdout = ((assis_level-5) * cmd_step);
     //spdout = 0x00;
   }
 }
@@ -396,11 +421,17 @@ void shutdown_click(){
     regularCANbat();
   }
   Serial.println("... Battery shutdown");
-  delay(200);
+  delay(1000);
+  //sendFrame(MTR, 4, 0x410000);
+  //delay(5);
   sendFrame(MTR, 4, 0x420001);
-  delay(1);
+  delay(5);
   sendFrame(BAT, 4, 0x250001);
   Serial.println("Commands are sent!");
+  delay(100);
+  sendFrame(MTR, 4, 0x420001);
+  delay(5);
+  sendFrame(BAT, 4, 0x250001);
   delay(1000);
 }
 
@@ -419,7 +450,7 @@ void setup(){
   clearScreen();
   LCD.write(">Wake up battery");
   selectLineTwo();
-  LCD.write("Bionx-Sparkfun");
+  LCD.write("Waitin 4 answer");
   delay(1000);
 
   
@@ -449,12 +480,12 @@ void setup(){
   assis_level = 5;               //5 means no assistance      
   delay(1000);
 
- 
-  initialCommands ();
-  //Serial.println("  >... Ended sending initial commands.");
-  regularCANmtr ();              // Appears to give one motor cycle afterwards.
-  regularCANbat ();              // Ending Battery Cycle
-
+  while (Flag_startstate == 0){
+    initialCommands ();
+    //Serial.println("  >... Ended sending initial commands.");
+    regularCANmtr ();              // Appears to give one motor cycle afterwards.
+    regularCANbat ();              // Ending Battery Cycle
+  }
   interrupts();
   Serial.println("Free Isr!! Keeping interrupts doing job ;)");
 }
@@ -474,7 +505,16 @@ void loop() {
 
   if (Flag_period){
     Flag_period = 0;
+    Flag_update --;
+    if (Flag_update == 0){
+      lcdUpdateData();
+      Flag_update=UPD_PRD;
+    }
     //x = millis();Serial.println(x-t);t=x;
+    
+    // Analogic joystik, cannot configure an interrupt on this input
+    // after long push, value is higher than edge
+    // -> then increase assistance level.
     if (digitalRead(RIGHT) == 0 ){
       much_r++;
       if (much_r > edge){
@@ -489,6 +529,7 @@ void loop() {
       }
     }
     if (digitalRead(LEFT) == 0){
+      // Same with joystic left push, decrease assistance level
       much_l++;
       if (much_l > edge){
         if (assis_level < 1) {
@@ -501,6 +542,8 @@ void loop() {
         }
       }
     }
+
+    // Regular Cycle (exceptional irregular cycle isnot used in this code)
     switch (state){
     case 0:
       startCANloop();
@@ -531,7 +574,6 @@ void CYCLE_PERIOD_ISR(){
 void sleepNow()         // here we put the arduino to sleep
 {
   set_sleep_mode(SLEEP_MODE_PWR_DOWN);   // sleep mode is set here
- 
   sleep_enable();          // enables the sleep bit in the mcucr register
   // so sleep is possible. just a safety pin
 
@@ -539,15 +581,17 @@ void sleepNow()         // here we put the arduino to sleep
   LCD.print("Battery is off.");
   selectLineTwo();
   LCD.print(">Going to sleep");
+  //  attachInterrupt(digitalPinToInterrupt (2),wake, LOW);
   sleep_mode();            // here the device is actually put to sleep!!
   // THE PROGRAM CONTINUES FROM HERE AFTER WAKING UP
- 
-  //sleep_disable();         // first thing after waking from sleep:
-  // disable sleep...
-  //detachInterrupt(0);      // disables interrupt 0 on pin 2 so the
   // wakeUpNow code will not be executed
-  // during normal running time.
- 
+  // during normal running time. 
+}
+
+void wake(void){
+    sleep_disable();         // first thing after waking from sleep:
+    // detachInterrupt(digitalPinToInterrupt (2));      // disables interrupt 0 on pin 2 so the
+    // disable sleep...
 }
 
 //Optional stuff
